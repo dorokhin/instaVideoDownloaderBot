@@ -29,7 +29,6 @@ services:
     command: ["./wait-for", "rabbitmq:5672", "--", "/downloader"]
     volumes:
       - ./data:/app/data
-      - ./wait-for:/wait-for
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - RABBITMQ_URL=${RABBITMQ_URL}
@@ -43,7 +42,6 @@ services:
     command: ["./wait-for", "rabbitmq:5672", "--", "/admin"]
     volumes:
       - ./data:/app/data
-      - ./wait-for:/wait-for
     ports:
       - "8080:8080"
     depends_on:
