@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"os"
+	"time"
 
 	"github.com/go-telegram-bot-api/telegram-bot-api"
 	"github.com/rabbitmq/amqp091-go"
@@ -23,9 +24,17 @@ func main() {
 
 	updates, _ := bot.GetUpdatesChan(u)
 
-	conn, err := amqp091.Dial(rabbitMQUrl)
-	if err != nil {
-		log.Fatal(err)
+	var conn *amqp091.Connection
+	for i := 0; i < 5; i++ {
+		conn, err = amqp091.Dial(rabbitMQUrl)
+		if err == nil {
+			break
+		}
+		log.Printf("Failed to connect to RabbitMQ: %v. Retrying...", err)
+		time.Sleep(5 * time.Second)
+	}
+	if conn == nil {
+		log.Fatalf("Failed to connect to RabbitMQ: %v", err)
 	}
 	defer conn.Close()
 
