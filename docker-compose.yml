@@ -15,7 +15,7 @@ services:
     build:
       context: .
     container_name: bot
-    command: ["/bot"]
+    command: ["./wait-for", "rabbitmq:5672", "--", "/bot"]
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - RABBITMQ_URL=${RABBITMQ_URL}
@@ -26,9 +26,10 @@ services:
     build:
       context: .
     container_name: downloader
-    command: ["/downloader"]
+    command: ["./wait-for", "rabbitmq:5672", "--", "/downloader"]
     volumes:
       - ./data:/app/data
+      - ./wait-for:/wait-for
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - RABBITMQ_URL=${RABBITMQ_URL}
@@ -39,9 +40,10 @@ services:
     build:
       context: .
     container_name: admin
-    command: ["/admin"]
+    command: ["./wait-for", "rabbitmq:5672", "--", "/admin"]
     volumes:
       - ./data:/app/data
+      - ./wait-for:/wait-for
     ports:
       - "8080:8080"
     depends_on:
