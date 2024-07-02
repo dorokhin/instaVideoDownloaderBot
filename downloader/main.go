@@ -3,12 +3,13 @@ package main
 import (
 	"database/sql"
 	"fmt"
-	"github.com/go-telegram-bot-api/telegram-bot-api"
-	_ "github.com/mattn/go-sqlite3"
-	"github.com/rabbitmq/amqp091-go"
 	"log"
 	"os"
 	"os/exec"
+
+	"github.com/go-telegram-bot-api/telegram-bot-api"
+	_ "github.com/mattn/go-sqlite3"
+	"github.com/rabbitmq/amqp091-go"
 )
 
 var (
@@ -115,11 +116,36 @@ func main() {
 
 	for d := range msgs {
 		url := string(d.Body)
-		chatID := d.Headers["chat_id"].(int64) // Assuming headers are int64
-		userID := d.Headers["user_id"].(int64) // Assuming headers are int64
-		username := d.Headers["username"].(string)
-		firstName := d.Headers["first_name"].(string)
-		lastName := d.Headers["last_name"].(string)
+
+		chatID, ok := d.Headers["chat_id"].(int64)
+		if !ok {
+			chatID32 := d.Headers["chat_id"].(int32)
+			chatID = int64(chatID32)
+		}
+
+		userID, ok := d.Headers["user_id"].(int64)
+		if !ok {
+			userID32 := d.Headers["user_id"].(int32)
+			userID = int64(userID32)
+		}
+
+		username, ok := d.Headers["username"].(string)
+		if !ok {
+			log.Printf("Invalid type for username")
+			continue
+		}
+
+		firstName, ok := d.Headers["first_name"].(string)
+		if !ok {
+			log.Printf("Invalid type for first_name")
+			continue
+		}
+
+		lastName, ok := d.Headers["last_name"].(string)
+		if !ok {
+			log.Printf("Invalid type for last_name")
+			continue
+		}
 
 		filePath, err := downloadVideo(url)
 		if err != nil {
