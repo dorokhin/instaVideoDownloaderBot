@@ -2,6 +2,7 @@
 FROM golang:1.22-alpine AS bot_builder
 
 WORKDIR /app
+COPY go.mod go.sum ./
 COPY bot/ ./bot/
 RUN cd bot && go build -o /bot
 
@@ -9,6 +10,7 @@ RUN cd bot && go build -o /bot
 FROM golang:1.22-alpine AS downloader_builder
 
 WORKDIR /app
+COPY go.mod go.sum ./
 COPY downloader/ ./downloader/
 RUN cd downloader && go build -o /downloader
 
@@ -16,6 +18,7 @@ RUN cd downloader && go build -o /downloader
 FROM golang:1.22-alpine AS admin_builder
 
 WORKDIR /app
+COPY go.mod go.sum ./
 COPY admin/ ./admin/
 RUN cd admin && go build -o /admin
 
