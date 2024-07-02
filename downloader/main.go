@@ -115,27 +115,27 @@ func main() {
 
 	for d := range msgs {
 		url := string(d.Body)
-		chatID := d.Headers["chat_id"].(int32) // Headers are usually int32
-		userID := d.Headers["user_id"].(int32) // Headers are usually int32
+		chatID := d.Headers["chat_id"].(int64) // Assuming headers are int64
+		userID := d.Headers["user_id"].(int64) // Assuming headers are int64
 		username := d.Headers["username"].(string)
 		firstName := d.Headers["first_name"].(string)
 		lastName := d.Headers["last_name"].(string)
 
 		filePath, err := downloadVideo(url)
 		if err != nil {
-			msg := tgbotapi.NewMessage(int64(chatID), fmt.Sprintf("Failed to download video: %v", err))
+			msg := tgbotapi.NewMessage(chatID, fmt.Sprintf("Failed to download video: %v", err))
 			bot.Send(msg)
 			continue
 		}
 
 		// Save user information to the database
-		_, err = db.Exec(insertUserQuery, int64(userID), username, firstName, lastName)
+		_, err = db.Exec(insertUserQuery, userID, username, firstName, lastName)
 		if err != nil {
 			log.Printf("Failed to save user information: %v", err)
 		}
 
 		// Save the download information to the database
-		_, err = db.Exec(insertDownloadQuery, int64(userID), url)
+		_, err = db.Exec(insertDownloadQuery, userID, url)
 		if err != nil {
 			log.Printf("Failed to save download information: %v", err)
 		}
@@ -148,13 +148,13 @@ func main() {
 
 		file, err := os.Open(filePath)
 		if err != nil {
-			msg := tgbotapi.NewMessage(int64(chatID), fmt.Sprintf("Failed to open video: %v", err))
+			msg := tgbotapi.NewMessage(chatID, fmt.Sprintf("Failed to open video: %v", err))
 			bot.Send(msg)
 			continue
 		}
 		defer file.Close()
 
-		msg := tgbotapi.NewDocumentUpload(int64(chatID), tgbotapi.FileReader{
+		msg := tgbotapi.NewDocumentUpload(chatID, tgbotapi.FileReader{
 			Name:   "video.mp4",
 			Reader: file,
 			Size:   -1,
