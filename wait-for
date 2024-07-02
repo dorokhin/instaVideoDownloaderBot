@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 
 # wait-for is a script designed to synchronize services like docker-compose.
 # It can be used to wait for another service to be ready.
