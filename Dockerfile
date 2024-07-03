@@ -24,7 +24,7 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY admin/ ./admin/
-RUN cd admin && go build -o /admin
+RUN cd admin && CGO_ENABLED=1 GOOS=linux go build -o /admin
 
 # Stage 4: Create the final image
 FROM alpine:latest
