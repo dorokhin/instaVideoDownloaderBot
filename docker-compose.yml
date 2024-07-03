@@ -15,7 +15,7 @@ services:
     build:
       context: .
     container_name: bot
-    command: ["/wait-for", "rabbitmq:5672", "--", "/bot"]
+    command: ["sh", "/wait-for", "rabbitmq:5672", "--", "/bot"]
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - RABBITMQ_URL=${RABBITMQ_URL}
@@ -26,14 +26,14 @@ services:
     build:
       context: .
     container_name: downloader
-    command: ["/wait-for", "rabbitmq:5672", "--", "/downloader"]
+    command: ["sh", "/wait-for", "rabbitmq:5672", "--", "/downloader"]
     volumes:
       - ./data:/app/data
+      - ./cookies.txt:/app/cookies.txt
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - RABBITMQ_URL=${RABBITMQ_URL}
-      - INSTAGRAM_USERNAME=${INSTAGRAM_USERNAME}
-      - INSTAGRAM_PASSWORD=${INSTAGRAM_PASSWORD}
+      - COOKIES_FILE_PATH=${COOKIES_FILE_PATH}
     depends_on:
       - rabbitmq
 
@@ -41,7 +41,7 @@ services:
     build:
       context: .
     container_name: admin
-    command: ["/wait-for", "rabbitmq:5672", "--", "/admin"]
+    command: ["sh", "/wait-for", "rabbitmq:5672", "--", "/admin"]
     volumes:
       - ./data:/app/data
     ports:
