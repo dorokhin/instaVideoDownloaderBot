@@ -57,32 +57,39 @@ func initDB() (*sql.DB, error) {
 }
 
 func downloadVideo(url string) (string, error) {
-	cmd := exec.Command("youtube-dl", "-o", "/tmp/video.mp4", url)
-	err := cmd.Run()
+	outputPath := "/tmp/video.mp4"
+	cmd := exec.Command("youtube-dl", "-o", outputPath, url)
+	output, err := cmd.CombinedOutput()
 	if err != nil {
+		log.Printf("Failed to download video: %s", string(output))
 		return "", err
 	}
-	return "/tmp/video.mp4", nil
+	return outputPath, nil
 }
 
 func main() {
+	log.Println("Starting downloader service")
+
 	db, err := initDB()
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer db.Close()
+	log.Println("Database initialized")
 
 	conn, err := amqp091.Dial(rabbitMQUrl)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer conn.Close()
+	log.Println("Connected to RabbitMQ")
 
 	ch, err := conn.Channel()
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer ch.Close()
+	log.Println("Channel opened")
 
 	q, err := ch.QueueDeclare(
 		"video_download",
@@ -95,6 +102,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	log.Println("Queue declared")
 
 	msgs, err := ch.Consume(
 		q.Name,
@@ -108,13 +116,16 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	log.Println("Started consuming messages")
 
 	bot, err := tgbotapi.NewBotAPI(telegramBotToken)
 	if err != nil {
 		log.Panic(err)
 	}
+	log.Println("Telegram bot initialized")
 
 	for d := range msgs {
+		log.Println("Received a message")
 		url := string(d.Body)
 
 		chatID, ok := d.Headers["chat_id"].(int64)
@@ -147,34 +158,46 @@ func main() {
 			continue
 		}
 
+		log.Printf("Downloading video from URL: %s", url)
 		filePath, err := downloadVideo(url)
 		if err != nil {
-			msg := tgbotapi.NewMessage(chatID, fmt.Sprintf("Failed to download video: %v", err))
+			errorMessage := fmt.Sprintf("Failed to download video: %v", err)
+			log.Println(errorMessage)
+			msg := tgbotapi.NewMessage(chatID, errorMessage)
 			bot.Send(msg)
 			continue
 		}
+		log.Printf("Video downloaded to: %s", filePath)
 
 		// Save user information to the database
 		_, err = db.Exec(insertUserQuery, userID, username, firstName, lastName)
 		if err != nil {
 			log.Printf("Failed to save user information: %v", err)
+		} else {
+			log.Println("User information saved")
 		}
 
 		// Save the download information to the database
 		_, err = db.Exec(insertDownloadQuery, userID, url)
 		if err != nil {
 			log.Printf("Failed to save download information: %v", err)
+		} else {
+			log.Println("Download information saved")
 		}
 
 		// Save the URL to the database
 		_, err = db.Exec(insertProcessedURLQuery, url)
 		if err != nil {
 			log.Printf("Failed to save URL: %v", err)
+		} else {
+			log.Println("URL information saved")
 		}
 
 		file, err := os.Open(filePath)
 		if err != nil {
-			msg := tgbotapi.NewMessage(chatID, fmt.Sprintf("Failed to open video: %v", err))
+			errorMessage := fmt.Sprintf("Failed to open video: %v", err)
+			log.Println(errorMessage)
+			msg := tgbotapi.NewMessage(chatID, errorMessage)
 			bot.Send(msg)
 			continue
 		}
@@ -186,5 +209,6 @@ func main() {
 			Size:   -1,
 		})
 		bot.Send(msg)
+		log.Println("Video sent to user")
 	}
 }
