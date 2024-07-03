@@ -15,6 +15,8 @@ import (
 var (
 	rabbitMQUrl       = os.Getenv("RABBITMQ_URL")
 	telegramBotToken  = os.Getenv("TELEGRAM_BOT_TOKEN")
+	instagramUsername = os.Getenv("INSTAGRAM_USERNAME")
+	instagramPassword = os.Getenv("INSTAGRAM_PASSWORD")
 	databaseFile      = "/app/data/videos.db"
 	createTablesQuery = `
 	CREATE TABLE IF NOT EXISTS processed_urls (
@@ -58,7 +60,7 @@ func initDB() (*sql.DB, error) {
 
 func downloadVideo(url string) (string, error) {
 	outputPath := "/tmp/video.mp4"
-	cmd := exec.Command("youtube-dl", "-o", outputPath, url)
+	cmd := exec.Command("youtube-dl", "-o", outputPath, "--username", instagramUsername, "--password", instagramPassword, url)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Printf("Failed to download video: %s", string(output))
