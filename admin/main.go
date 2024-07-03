@@ -3,159 +3,298 @@ package main
 import (
 	"database/sql"
 	"log"
-	"time"
+	"net/http"
+	"text/template"
 
-	"github.com/gofiber/fiber/v2"
 	_ "github.com/mattn/go-sqlite3"
 )
 
-var databaseFile = "/app/data/videos.db"
+var (
+	databaseFile = "/app/data/videos.db"
+)
 
 func initDB() (*sql.DB, error) {
 	db, err := sql.Open("sqlite3", databaseFile)
 	if err != nil {
 		return nil, err
 	}
-
 	return db, nil
 }
 
-func getProcessedURLs(db *sql.DB) ([]fiber.Map, error) {
-	rows, err := db.Query("SELECT url, timestamp FROM processed_urls")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var urls []fiber.Map
-	for rows.Next() {
-		var url string
-		var timestamp time.Time
-		err = rows.Scan(&url, &timestamp)
-		if err != nil {
-			return nil, err
-		}
-		urls = append(urls, fiber.Map{
-			"url":       url,
-			"timestamp": timestamp,
-		})
-	}
-
-	return urls, nil
+type ProcessedURL struct {
+	URL          string
+	Timestamp    string
+	FileSize     int64
+	PreviewImage string
+	Tags         string
+	Description  string
 }
 
-func getStatistics(db *sql.DB, duration time.Duration) (int, error) {
-	var count int
-	timeLimit := time.Now().Add(-duration)
-	query := `SELECT COUNT(*) FROM processed_urls WHERE timestamp > ?`
-	err := db.QueryRow(query, timeLimit).Scan(&count)
-	return count, err
+type UserDownload struct {
+	UserID       int64
+	Username     string
+	FirstName    string
+	LastName     string
+	URL          string
+	Timestamp    string
+	FileSize     int64
+	PreviewImage string
+	Tags         string
+	Description  string
 }
 
-func getUsers(db *sql.DB) ([]fiber.Map, error) {
-	rows, err := db.Query("SELECT user_id, username, first_name, last_name FROM users")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var users []fiber.Map
-	for rows.Next() {
-		var userID int
-		var username, firstName, lastName string
-		err = rows.Scan(&userID, &username, &firstName, &lastName)
-		if err != nil {
-			return nil, err
-		}
-		users = append(users, fiber.Map{
-			"user_id":    userID,
-			"username":   username,
-			"first_name": firstName,
-			"last_name":  lastName,
-		})
-	}
-
-	return users, nil
+type Statistics struct {
+	TotalFileSize  int64
+	TotalDownloads int
+	UserDownloads  []UserDownload
 }
 
-func getUserDownloads(db *sql.DB, userID string) ([]fiber.Map, error) {
-	rows, err := db.Query("SELECT url, timestamp FROM downloads WHERE user_id = ?", userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var downloads []fiber.Map
-	for rows.Next() {
-		var url string
-		var timestamp time.Time
-		err = rows.Scan(&url, &timestamp)
-		if err != nil {
-			return nil, err
-		}
-		downloads = append(downloads, fiber.Map{
-			"url":       url,
-			"timestamp": timestamp,
-		})
-	}
-
-	return downloads, nil
-}
-
-func main() {
+func processedURLsHandler(w http.ResponseWriter, r *http.Request) {
 	db, err := initDB()
 	if err != nil {
-		log.Fatal(err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 	defer db.Close()
 
-	app := fiber.New()
+	rows, err := db.Query("SELECT url, timestamp, file_size, preview_image, tags, description FROM processed_urls")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
 
-	app.Get("/processed_urls", func(c *fiber.Ctx) error {
-		urls, err := getProcessedURLs(db)
-		if err != nil {
-			return c.Status(500).SendString(err.Error())
+	var processedURLs []ProcessedURL
+	for rows.Next() {
+		var url ProcessedURL
+		if err := rows.Scan(&url.URL, &url.Timestamp, &url.FileSize, &url.PreviewImage, &url.Tags, &url.Description); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
-		return c.JSON(urls)
-	})
+		processedURLs = append(processedURLs, url)
+	}
 
-	app.Get("/statistics", func(c *fiber.Ctx) error {
-		stats := make(map[string]int)
+	tmpl, err := template.New("processed_urls").Parse(`
+		<html>
+		<head>
+			<title>Processed URLs</title>
+		</head>
+		<body>
+			<h1>Processed URLs</h1>
+			<table border="1">
+				<tr>
+					<th>URL</th>
+					<th>Timestamp</th>
+					<th>File Size</th>
+					<th>Preview Image</th>
+					<th>Tags</th>
+					<th>Description</th>
+				</tr>
+				{{range .}}
+				<tr>
+					<td>{{.URL}}</td>
+					<td>{{.Timestamp}}</td>
+					<td>{{.FileSize}}</td>
+					<td><img src="{{.PreviewImage}}" alt="Preview Image" width="100"></td>
+					<td>{{.Tags}}</td>
+					<td>{{.Description}}</td>
+				</tr>
+				{{end}}
+			</table>
+		</body>
+		</html>
+	`)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
-		durations := map[string]time.Duration{
-			"last_hour":  time.Hour,
-			"last_24h":   24 * time.Hour,
-			"last_week":  7 * 24 * time.Hour,
-			"last_month": 30 * 24 * time.Hour,
+	if err := tmpl.Execute(w, processedURLs); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+func userDownloadsHandler(w http.ResponseWriter, r *http.Request) {
+	db, err := initDB()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	rows, err := db.Query(`
+		SELECT u.user_id, u.username, u.first_name, u.last_name, d.url, d.timestamp, d.file_size, d.preview_image, d.tags, d.description
+		FROM downloads d
+		JOIN users u ON d.user_id = u.user_id
+	`)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var userDownloads []UserDownload
+	for rows.Next() {
+		var download UserDownload
+		if err := rows.Scan(&download.UserID, &download.Username, &download.FirstName, &download.LastName, &download.URL, &download.Timestamp, &download.FileSize, &download.PreviewImage, &download.Tags, &download.Description); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
+		userDownloads = append(userDownloads, download)
+	}
 
-		for k, d := range durations {
-			count, err := getStatistics(db, d)
-			if err != nil {
-				return c.Status(500).SendString(err.Error())
-			}
-			stats[k] = count
+	tmpl, err := template.New("user_downloads").Parse(`
+		<html>
+		<head>
+			<title>User Downloads</title>
+		</head>
+		<body>
+			<h1>User Downloads</h1>
+			<table border="1">
+				<tr>
+					<th>User ID</th>
+					<th>Username</th>
+					<th>First Name</th>
+					<th>Last Name</th>
+					<th>URL</th>
+					<th>Timestamp</th>
+					<th>File Size</th>
+					<th>Preview Image</th>
+					<th>Tags</th>
+					<th>Description</th>
+				</tr>
+				{{range .}}
+				<tr>
+					<td>{{.UserID}}</td>
+					<td>{{.Username}}</td>
+					<td>{{.FirstName}}</td>
+					<td>{{.LastName}}</td>
+					<td>{{.URL}}</td>
+					<td>{{.Timestamp}}</td>
+					<td>{{.FileSize}}</td>
+					<td><img src="{{.PreviewImage}}" alt="Preview Image" width="100"></td>
+					<td>{{.Tags}}</td>
+					<td>{{.Description}}</td>
+				</tr>
+				{{end}}
+			</table>
+		</body>
+		</html>
+	`)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if err := tmpl.Execute(w, userDownloads); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+func statisticsHandler(w http.ResponseWriter, r *http.Request) {
+	db, err := initDB()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	var totalFileSize int64
+	var totalDownloads int
+
+	err = db.QueryRow("SELECT SUM(file_size) FROM processed_urls").Scan(&totalFileSize)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	err = db.QueryRow("SELECT COUNT(*) FROM processed_urls").Scan(&totalDownloads)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	rows, err := db.Query(`
+		SELECT u.user_id, u.username, u.first_name, u.last_name, d.url, d.timestamp, d.file_size, d.preview_image, d.tags, d.description
+		FROM downloads d
+		JOIN users u ON d.user_id = u.user_id
+	`)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var userDownloads []UserDownload
+	for rows.Next() {
+		var download UserDownload
+		if err := rows.Scan(&download.UserID, &download.Username, &download.FirstName, &download.LastName, &download.URL, &download.Timestamp, &download.FileSize, &download.PreviewImage, &download.Tags, &download.Description); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
+		userDownloads = append(userDownloads, download)
+	}
 
-		return c.JSON(stats)
-	})
+	statistics := Statistics{
+		TotalFileSize:  totalFileSize,
+		TotalDownloads: totalDownloads,
+		UserDownloads:  userDownloads,
+	}
 
-	app.Get("/users", func(c *fiber.Ctx) error {
-		users, err := getUsers(db)
-		if err != nil {
-			return c.Status(500).SendString(err.Error())
-		}
-		return c.JSON(users)
-	})
+	tmpl, err := template.New("statistics").Parse(`
+		<html>
+		<head>
+			<title>Statistics</title>
+		</head>
+		<body>
+			<h1>Statistics</h1>
+			<p>Total File Size: {{.TotalFileSize}} bytes</p>
+			<p>Total Downloads: {{.TotalDownloads}}</p>
+			<h2>User Downloads</h2>
+			<table border="1">
+				<tr>
+					<th>User ID</th>
+					<th>Username</th>
+					<th>First Name</th>
+					<th>Last Name</th>
+					<th>URL</th>
+					<th>Timestamp</th>
+					<th>File Size</th>
+					<th>Preview Image</th>
+					<th>Tags</th>
+					<th>Description</th>
+				</tr>
+				{{range .UserDownloads}}
+				<tr>
+					<td>{{.UserID}}</td>
+					<td>{{.Username}}</td>
+					<td>{{.FirstName}}</td>
+					<td>{{.LastName}}</td>
+					<td>{{.URL}}</td>
+					<td>{{.Timestamp}}</td>
+					<td>{{.FileSize}}</td>
+					<td><img src="{{.PreviewImage}}" alt="Preview Image" width="100"></td>
+					<td>{{.Tags}}</td>
+					<td>{{.Description}}</td>
+				</tr>
+				{{end}}
+			</table>
+		</body>
+		</html>
+	`)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
-	app.Get("/user_downloads/:id", func(c *fiber.Ctx) error {
-		userID := c.Params("id")
-		downloads, err := getUserDownloads(db, userID)
-		if err != nil {
-			return c.Status(500).SendString(err.Error())
-		}
-		return c.JSON(downloads)
-	})
+	if err := tmpl.Execute(w, statistics); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
 
-	log.Fatal(app.Listen(":8080"))
+func main() {
+	http.HandleFunc("/processed_urls", processedURLsHandler)
+	http.HandleFunc("/user_downloads", userDownloadsHandler)
+	http.HandleFunc("/statistics", statisticsHandler)
+	log.Fatal(http.ListenAndServe(":8080", nil))
 }

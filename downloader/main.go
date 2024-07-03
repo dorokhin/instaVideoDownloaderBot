@@ -2,14 +2,15 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
-	"log"
-	"os"
-	"os/exec"
-
 	"github.com/go-telegram-bot-api/telegram-bot-api"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/rabbitmq/amqp091-go"
+	"log"
+	"os"
+	"os/exec"
+	"strings"
 )
 
 var (
@@ -21,26 +22,36 @@ var (
 	CREATE TABLE IF NOT EXISTS processed_urls (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		url TEXT NOT NULL,
-		timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+		timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+		file_size INTEGER,
+		preview_image TEXT,
+		tags TEXT,
+		description TEXT
 	);
 	CREATE TABLE IF NOT EXISTS users (
 		id INTEGER PRIMARY KEY,
 		user_id INTEGER NOT NULL,
 		username TEXT,
 		first_name TEXT,
-		last_name TEXT
+		last_name TEXT,
+		total_bytes_downloaded INTEGER DEFAULT 0
 	);
 	CREATE TABLE IF NOT EXISTS downloads (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		user_id INTEGER NOT NULL,
 		url TEXT NOT NULL,
 		timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+		file_size INTEGER,
+		preview_image TEXT,
+		tags TEXT,
+		description TEXT,
 		FOREIGN KEY (user_id) REFERENCES users (id)
 	);
 	`
 	insertUserQuery         = `INSERT OR IGNORE INTO users (user_id, username, first_name, last_name) VALUES (?, ?, ?, ?)`
-	insertDownloadQuery     = `INSERT INTO downloads (user_id, url) VALUES (?, ?)`
-	insertProcessedURLQuery = `INSERT INTO processed_urls (url) VALUES (?)`
+	updateUserQuery         = `UPDATE users SET total_bytes_downloaded = total_bytes_downloaded + ? WHERE user_id = ?`
+	insertDownloadQuery     = `INSERT INTO downloads (user_id, url, file_size, preview_image, tags, description) VALUES (?, ?, ?, ?, ?, ?)`
+	insertProcessedURLQuery = `INSERT INTO processed_urls (url, file_size, preview_image, tags, description) VALUES (?, ?, ?, ?, ?)`
 )
 
 func initDB() (*sql.DB, error) {
@@ -57,15 +68,35 @@ func initDB() (*sql.DB, error) {
 	return db, nil
 }
 
-func downloadVideo(url string) (string, error) {
+func downloadVideo(url string) (string, int64, string, string, string, error) {
 	outputPath := "/tmp/video.mp4"
-	cmd := exec.Command("yt-dlp", "-o", outputPath, "--cookies", cookiesFilePath, url)
+	cmd := exec.Command("yt-dlp", "-o", outputPath, "--cookies", cookiesFilePath, "--write-info-json", url)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Printf("Failed to download video: %s", string(output))
-		return "", err
+		return "", 0, "", "", "", err
 	}
-	return outputPath, nil
+	infoFile := outputPath + ".info.json"
+	info, err := os.ReadFile(infoFile)
+	if err != nil {
+		log.Printf("Failed to read info file: %s", err)
+		return "", 0, "", "", "", err
+	}
+
+	var size int64
+	var previewImage, tags, description string
+	infoJSON := map[string]interface{}{}
+	err = json.Unmarshal(info, &infoJSON)
+	if err != nil {
+		log.Printf("Failed to parse info JSON: %s", err)
+	} else {
+		size = int64(infoJSON["filesize"].(float64))
+		previewImage = infoJSON["thumbnail"].(string)
+		tags = strings.Join(infoJSON["tags"].([]string), ", ")
+		description = infoJSON["description"].(string)
+	}
+
+	return outputPath, size, previewImage, tags, description, nil
 }
 
 func main() {
@@ -160,7 +191,7 @@ func main() {
 		}
 
 		log.Printf("Downloading video from URL: %s", url)
-		filePath, err := downloadVideo(url)
+		filePath, size, previewImage, tags, description, err := downloadVideo(url)
 		if err != nil {
 			errorMessage := fmt.Sprintf("Failed to download video: %v", err)
 			log.Println(errorMessage)
@@ -178,8 +209,16 @@ func main() {
 			log.Println("User information saved")
 		}
 
+		// Update user total bytes downloaded
+		_, err = db.Exec(updateUserQuery, size, userID)
+		if err != nil {
+			log.Printf("Failed to update user total bytes downloaded: %v", err)
+		} else {
+			log.Println("User total bytes downloaded updated")
+		}
+
 		// Save the download information to the database
-		_, err = db.Exec(insertDownloadQuery, userID, url)
+		_, err = db.Exec(insertDownloadQuery, userID, url, size, previewImage, tags, description)
 		if err != nil {
 			log.Printf("Failed to save download information: %v", err)
 		} else {
@@ -187,7 +226,7 @@ func main() {
 		}
 
 		// Save the URL to the database
-		_, err = db.Exec(insertProcessedURLQuery, url)
+		_, err = db.Exec(insertProcessedURLQuery, url, size, previewImage, tags, description)
 		if err != nil {
 			log.Printf("Failed to save URL: %v", err)
 		} else {
