@@ -34,8 +34,9 @@ WORKDIR /root/
 COPY --from=bot_builder /bot /bot
 COPY --from=downloader_builder /downloader /downloader
 COPY --from=admin_builder /admin /admin
-COPY wait-for /wait-for
 
-RUN apk add --no-cache ca-certificates youtube-dl sqlite
+RUN apk add --no-cache ca-certificates yt-dlp sqlite
+
+COPY wait-for /wait-for
 
 CMD ["sh"]

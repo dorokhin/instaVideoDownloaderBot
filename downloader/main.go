@@ -60,7 +60,7 @@ func initDB() (*sql.DB, error) {
 
 func downloadVideo(url string) (string, error) {
 	outputPath := "/tmp/video.mp4"
-	cmd := exec.Command("youtube-dl", "-o", outputPath, "--username", instagramUsername, "--password", instagramPassword, url)
+	cmd := exec.Command("yt-dlp", "-o", outputPath, "--username", instagramUsername, "--password", instagramPassword, url)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Printf("Failed to download video: %s", string(output))
