@@ -4,13 +4,14 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/go-telegram-bot-api/telegram-bot-api"
-	_ "github.com/mattn/go-sqlite3"
-	"github.com/rabbitmq/amqp091-go"
 	"log"
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/go-telegram-bot-api/telegram-bot-api"
+	_ "github.com/mattn/go-sqlite3"
+	"github.com/rabbitmq/amqp091-go"
 )
 
 var (
@@ -70,13 +71,13 @@ func initDB() (*sql.DB, error) {
 
 func downloadVideo(url string) (string, int64, string, string, string, error) {
 	outputPath := "/tmp/video.mp4"
-	cmd := exec.Command("yt-dlp", "-o", outputPath, "--cookies", cookiesFilePath, "--write-info-json", url)
+	cmd := exec.Command("yt-dlp", "-o", "/tmp/video.%(ext)s", "--cookies", cookiesFilePath, "--write-info-json", url)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Printf("Failed to download video: %s", string(output))
 		return "", 0, "", "", "", err
 	}
-	infoFile := outputPath + ".info.json"
+	infoFile := "/tmp/video.info.json"
 	info, err := os.ReadFile(infoFile)
 	if err != nil {
 		log.Printf("Failed to read info file: %s", err)
@@ -90,10 +91,24 @@ func downloadVideo(url string) (string, int64, string, string, string, error) {
 	if err != nil {
 		log.Printf("Failed to parse info JSON: %s", err)
 	} else {
-		size = int64(infoJSON["filesize"].(float64))
-		previewImage = infoJSON["thumbnail"].(string)
-		tags = strings.Join(infoJSON["tags"].([]string), ", ")
-		description = infoJSON["description"].(string)
+		if fileSize, ok := infoJSON["filesize"].(float64); ok {
+			size = int64(fileSize)
+		}
+		if thumbnail, ok := infoJSON["thumbnail"].(string); ok {
+			previewImage = thumbnail
+		}
+		if tagsList, ok := infoJSON["tags"].([]interface{}); ok {
+			var tagsArr []string
+			for _, tag := range tagsList {
+				if tagStr, ok := tag.(string); ok {
+					tagsArr = append(tagsArr, tagStr)
+				}
+			}
+			tags = strings.Join(tagsArr, ", ")
+		}
+		if desc, ok := infoJSON["description"].(string); ok {
+			description = desc
+		}
 	}
 
 	return outputPath, size, previewImage, tags, description, nil
