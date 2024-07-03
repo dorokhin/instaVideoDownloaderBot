@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 
 	"github.com/go-telegram-bot-api/telegram-bot-api"
@@ -91,7 +92,9 @@ func downloadVideo(url string) (string, int64, string, string, string, error) {
 	if err != nil {
 		log.Printf("Failed to parse info JSON: %s", err)
 	} else {
-		if fileSize, ok := infoJSON["filesize"].(float64); ok {
+		if fileSize, ok := infoJSON["filesize_approx"].(float64); ok {
+			size = int64(fileSize)
+		} else if fileSize, ok := infoJSON["filesize"].(float64); ok {
 			size = int64(fileSize)
 		}
 		if thumbnail, ok := infoJSON["thumbnail"].(string); ok {
@@ -151,7 +154,7 @@ func main() {
 	}
 	log.Println("Queue declared")
 
-	msgs, err := ch.Consume(
+	_, err = ch.Consume(
 		q.Name,
 		"",
 		true,
@@ -171,99 +174,109 @@ func main() {
 	}
 	log.Println("Telegram bot initialized")
 
-	for d := range msgs {
-		log.Println("Received a message")
-		url := string(d.Body)
+	botMessageHandler := func(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
+		if update.Message != nil {
+			if update.Message.IsCommand() {
+				switch update.Message.Command() {
+				case "start":
+					msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Welcome to the Instagram Video Downloader Bot! Send me an Instagram link to download the video.")
+					bot.Send(msg)
+				default:
+					msg := tgbotapi.NewMessage(update.Message.Chat.ID, "I don't know that command")
+					bot.Send(msg)
+				}
+			} else if update.Message.Text != "" {
+				url := update.Message.Text
+				matched, err := regexp.MatchString(`https://(www\.)?instagram\.com/.*`, url)
+				if err != nil || !matched {
+					msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Please send a valid Instagram link.")
+					bot.Send(msg)
+					return
+				}
 
-		chatID, ok := d.Headers["chat_id"].(int64)
-		if !ok {
-			chatID32 := d.Headers["chat_id"].(int32)
-			chatID = int64(chatID32)
+				msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Downloading your video. Please wait...")
+				bot.Send(msg)
+
+				filePath, size, previewImage, tags, description, err := downloadVideo(url)
+				if err != nil {
+					errorMessage := fmt.Sprintf("Failed to download video: %v", err)
+					log.Println(errorMessage)
+					msg := tgbotapi.NewMessage(update.Message.Chat.ID, errorMessage)
+					bot.Send(msg)
+					return
+				}
+
+				file, err := os.Open(filePath)
+				if err != nil {
+					errorMessage := fmt.Sprintf("Failed to open video: %v", err)
+					log.Println(errorMessage)
+					msg := tgbotapi.NewMessage(update.Message.Chat.ID, errorMessage)
+					bot.Send(msg)
+					return
+				}
+				defer file.Close()
+
+				videoMsg := tgbotapi.NewVideoUpload(update.Message.Chat.ID, tgbotapi.FileReader{
+					Name:   "video.mp4",
+					Reader: file,
+					Size:   -1,
+				})
+				bot.Send(videoMsg)
+
+				if description != "" {
+					descMsg := tgbotapi.NewMessage(update.Message.Chat.ID, description)
+					bot.Send(descMsg)
+				}
+
+				userID := update.Message.From.ID
+				username := update.Message.From.UserName
+				firstName := update.Message.From.FirstName
+				lastName := update.Message.From.LastName
+
+				// Save user information to the database
+				_, err = db.Exec(insertUserQuery, userID, username, firstName, lastName)
+				if err != nil {
+					log.Printf("Failed to save user information: %v", err)
+				} else {
+					log.Println("User information saved")
+				}
+
+				// Update user total bytes downloaded
+				_, err = db.Exec(updateUserQuery, size, userID)
+				if err != nil {
+					log.Printf("Failed to update user total bytes downloaded: %v", err)
+				} else {
+					log.Println("User total bytes downloaded updated")
+				}
+
+				// Save the download information to the database
+				_, err = db.Exec(insertDownloadQuery, userID, url, size, previewImage, tags, description)
+				if err != nil {
+					log.Printf("Failed to save download information: %v", err)
+				} else {
+					log.Println("Download information saved")
+				}
+
+				// Save the URL to the database
+				_, err = db.Exec(insertProcessedURLQuery, url, size, previewImage, tags, description)
+				if err != nil {
+					log.Printf("Failed to save URL: %v", err)
+				} else {
+					log.Println("URL information saved")
+				}
+			}
 		}
+	}
 
-		userID, ok := d.Headers["user_id"].(int64)
-		if !ok {
-			userID32 := d.Headers["user_id"].(int32)
-			userID = int64(userID32)
-		}
+	u := tgbotapi.NewUpdate(0)
+	u.Timeout = 60
 
-		username, ok := d.Headers["username"].(string)
-		if !ok {
-			log.Printf("Invalid type for username")
-			continue
-		}
+	updates, err := bot.GetUpdatesChan(u)
+	if err != nil {
+		log.Fatal(err)
+	}
 
-		firstName, ok := d.Headers["first_name"].(string)
-		if !ok {
-			log.Printf("Invalid type for first_name")
-			continue
-		}
-
-		lastName, ok := d.Headers["last_name"].(string)
-		if !ok {
-			log.Printf("Invalid type for last_name")
-			continue
-		}
-
-		log.Printf("Downloading video from URL: %s", url)
-		filePath, size, previewImage, tags, description, err := downloadVideo(url)
-		if err != nil {
-			errorMessage := fmt.Sprintf("Failed to download video: %v", err)
-			log.Println(errorMessage)
-			msg := tgbotapi.NewMessage(chatID, errorMessage)
-			bot.Send(msg)
-			continue
-		}
-		log.Printf("Video downloaded to: %s", filePath)
-
-		// Save user information to the database
-		_, err = db.Exec(insertUserQuery, userID, username, firstName, lastName)
-		if err != nil {
-			log.Printf("Failed to save user information: %v", err)
-		} else {
-			log.Println("User information saved")
-		}
-
-		// Update user total bytes downloaded
-		_, err = db.Exec(updateUserQuery, size, userID)
-		if err != nil {
-			log.Printf("Failed to update user total bytes downloaded: %v", err)
-		} else {
-			log.Println("User total bytes downloaded updated")
-		}
-
-		// Save the download information to the database
-		_, err = db.Exec(insertDownloadQuery, userID, url, size, previewImage, tags, description)
-		if err != nil {
-			log.Printf("Failed to save download information: %v", err)
-		} else {
-			log.Println("Download information saved")
-		}
-
-		// Save the URL to the database
-		_, err = db.Exec(insertProcessedURLQuery, url, size, previewImage, tags, description)
-		if err != nil {
-			log.Printf("Failed to save URL: %v", err)
-		} else {
-			log.Println("URL information saved")
-		}
-
-		file, err := os.Open(filePath)
-		if err != nil {
-			errorMessage := fmt.Sprintf("Failed to open video: %v", err)
-			log.Println(errorMessage)
-			msg := tgbotapi.NewMessage(chatID, errorMessage)
-			bot.Send(msg)
-			continue
-		}
-		defer file.Close()
-
-		msg := tgbotapi.NewDocumentUpload(chatID, tgbotapi.FileReader{
-			Name:   "video.mp4",
-			Reader: file,
-			Size:   -1,
-		})
-		bot.Send(msg)
-		log.Println("Video sent to user")
+	for update := range updates {
+		go botMessageHandler(bot, update)
 	}
 }

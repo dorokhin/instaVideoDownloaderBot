@@ -57,7 +57,7 @@ func processedURLsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer db.Close()
 
-	rows, err := db.Query("SELECT url, timestamp, file_size, preview_image, tags, description FROM processed_urls")
+	rows, err := db.Query("SELECT DISTINCT url, timestamp, file_size, preview_image, tags, description FROM processed_urls")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -123,7 +123,7 @@ func userDownloadsHandler(w http.ResponseWriter, r *http.Request) {
 	defer db.Close()
 
 	rows, err := db.Query(`
-		SELECT u.user_id, u.username, u.first_name, u.last_name, d.url, d.timestamp, d.file_size, d.preview_image, d.tags, d.description
+		SELECT DISTINCT u.user_id, u.username, u.first_name, u.last_name, d.url, d.timestamp, d.file_size, d.preview_image, d.tags, d.description
 		FROM downloads d
 		JOIN users u ON d.user_id = u.user_id
 	`)
@@ -208,14 +208,14 @@ func statisticsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = db.QueryRow("SELECT COUNT(*) FROM processed_urls").Scan(&totalDownloads)
+	err = db.QueryRow("SELECT COUNT(DISTINCT url) FROM processed_urls").Scan(&totalDownloads)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	rows, err := db.Query(`
-		SELECT u.user_id, u.username, u.first_name, u.last_name, d.url, d.timestamp, d.file_size, d.preview_image, d.tags, d.description
+		SELECT DISTINCT u.user_id, u.username, u.first_name, u.last_name, d.url, d.timestamp, d.file_size, d.preview_image, d.tags, d.description
 		FROM downloads d
 		JOIN users u ON d.user_id = u.user_id
 	`)
