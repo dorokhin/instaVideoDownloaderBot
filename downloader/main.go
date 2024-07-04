@@ -40,20 +40,29 @@ var (
 	CREATE TABLE IF NOT EXISTS processed_urls (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		url TEXT NOT NULL,
-		timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+		timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+		file_size INTEGER,
+		preview_image TEXT,
+		tags TEXT,
+		description TEXT
 	);
 	CREATE TABLE IF NOT EXISTS users (
 		id INTEGER PRIMARY KEY,
 		user_id INTEGER NOT NULL,
 		username TEXT,
 		first_name TEXT,
-		last_name TEXT
+		last_name TEXT,
+		total_bytes_downloaded INTEGER DEFAULT 0
 	);
 	CREATE TABLE IF NOT EXISTS downloads (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		user_id INTEGER NOT NULL,
 		url TEXT NOT NULL,
 		timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+		file_size INTEGER,
+		preview_image TEXT,
+		tags TEXT,
+		description TEXT,
 		FOREIGN KEY (user_id) REFERENCES users (id)
 	);
 	`
