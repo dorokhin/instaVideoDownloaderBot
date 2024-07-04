@@ -1,32 +1,53 @@
-version: '3.8'
-
+---
+version: "3.8"
 services:
   rabbitmq:
-    image: "rabbitmq:3-management"
+    image: rabbitmq:3-management
     container_name: rabbitmq
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - 5672:5672
+      - 15672:15672
     environment:
       RABBITMQ_DEFAULT_USER: guest
       RABBITMQ_DEFAULT_PASS: guest
-
+      RABBITMQ_LOGS: "-"
+      RABBITMQ_SASL_LOGS: "warn"
+      RABBITMQ_LOGS_LEVEL: "warn"
   bot:
     build:
       context: .
+      args:
+        - HTTP_PROXY=http://172.17.0.1:1081
+        - HTTPS_PROXY=http://172.17.0.1:1081
     container_name: bot
-    command: ["sh", "/wait-for", "rabbitmq:5672", "--", "/bot"]
+    command:
+      - sh
+      - /wait-for
+      - rabbitmq:5672
+      - --
+      - /bot
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - RABBITMQ_URL=${RABBITMQ_URL}
+      - COOKIES_FILE_PATH=${COOKIES_FILE_PATH}
+      - HTTP_PROXY=http://172.17.0.1:1081
+      - HTTPS_PROXY=http://172.17.0.1:1081
+      - NO_PROXY=localhost,127.0.0.1,172.17.0.1
     depends_on:
       - rabbitmq
-
   downloader:
     build:
       context: .
+      args:
+        - HTTP_PROXY=http://172.17.0.1:1081
+        - HTTPS_PROXY=http://172.17.0.1:1081
     container_name: downloader
-    command: ["sh", "/wait-for", "rabbitmq:5672", "--", "/downloader"]
+    command:
+      - sh
+      - /wait-for
+      - rabbitmq:5672
+      - --
+      - /downloader
     volumes:
       - ./data:/app/data
       - ./cookies.txt:/app/cookies.txt
@@ -34,17 +55,24 @@ services:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - RABBITMQ_URL=${RABBITMQ_URL}
       - COOKIES_FILE_PATH=${COOKIES_FILE_PATH}
+      - HTTP_PROXY=http://172.17.0.1:1081
+      - HTTPS_PROXY=http://172.17.0.1:1081
+      - NO_PROXY=localhost,127.0.0.1,172.17.0.1
     depends_on:
       - rabbitmq
-
   admin:
     build:
       context: .
     container_name: admin
-    command: ["sh", "/wait-for", "rabbitmq:5672", "--", "/admin"]
+    command:
+      - sh
+      - /wait-for
+      - rabbitmq:5672
+      - --
+      - /admin
     volumes:
       - ./data:/app/data
     ports:
-      - "8080:8080"
+      - 8080:8080
     depends_on:
       - rabbitmq
