@@ -3,72 +3,36 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"log"
 	"os"
 	"os/exec"
-	"regexp"
 	"strings"
 
-	"github.com/go-telegram-bot-api/telegram-bot-api"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/rabbitmq/amqp091-go"
 )
 
-var (
-	rabbitMQUrl       = os.Getenv("RABBITMQ_URL")
-	telegramBotToken  = os.Getenv("TELEGRAM_BOT_TOKEN")
-	cookiesFilePath   = os.Getenv("COOKIES_FILE_PATH")
-	databaseFile      = "/app/data/videos.db"
-	createTablesQuery = `
-	CREATE TABLE IF NOT EXISTS processed_urls (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		url TEXT NOT NULL,
-		timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-		file_size INTEGER,
-		preview_image TEXT,
-		tags TEXT,
-		description TEXT
-	);
-	CREATE TABLE IF NOT EXISTS users (
-		id INTEGER PRIMARY KEY,
-		user_id INTEGER NOT NULL,
-		username TEXT,
-		first_name TEXT,
-		last_name TEXT,
-		total_bytes_downloaded INTEGER DEFAULT 0
-	);
-	CREATE TABLE IF NOT EXISTS downloads (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		user_id INTEGER NOT NULL,
-		url TEXT NOT NULL,
-		timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-		file_size INTEGER,
-		preview_image TEXT,
-		tags TEXT,
-		description TEXT,
-		FOREIGN KEY (user_id) REFERENCES users (id)
-	);
-	`
-	insertUserQuery         = `INSERT OR IGNORE INTO users (user_id, username, first_name, last_name) VALUES (?, ?, ?, ?)`
-	updateUserQuery         = `UPDATE users SET total_bytes_downloaded = total_bytes_downloaded + ? WHERE user_id = ?`
-	insertDownloadQuery     = `INSERT INTO downloads (user_id, url, file_size, preview_image, tags, description) VALUES (?, ?, ?, ?, ?, ?)`
-	insertProcessedURLQuery = `INSERT INTO processed_urls (url, file_size, preview_image, tags, description) VALUES (?, ?, ?, ?, ?)`
-)
-
-func initDB() (*sql.DB, error) {
-	db, err := sql.Open("sqlite3", databaseFile)
-	if err != nil {
-		return nil, err
-	}
-
-	_, err = db.Exec(createTablesQuery)
-	if err != nil {
-		return nil, err
-	}
-
-	return db, nil
+type DownloadTask struct {
+	URL       string `json:"url"`
+	ChatID    int64  `json:"chat_id"`
+	MessageID int    `json:"message_id"`
 }
+
+type DownloadResult struct {
+	URL          string `json:"url"`
+	FilePath     string `json:"file_path"`
+	Size         int64  `json:"size"`
+	PreviewImage string `json:"preview_image"`
+	Tags         string `json:"tags"`
+	Description  string `json:"description"`
+	ChatID       int64  `json:"chat_id"`
+	MessageID    int    `json:"message_id"`
+}
+
+var (
+	cookiesFilePath = os.Getenv("COOKIES_FILE_PATH")
+	databaseFile    = "/app/data/videos.db"
+)
 
 func downloadVideo(url string) (string, int64, string, string, string, error) {
 	outputPath := "/tmp/video.mp4"
@@ -118,28 +82,17 @@ func downloadVideo(url string) (string, int64, string, string, string, error) {
 }
 
 func main() {
-	log.Println("Starting downloader service")
-
-	db, err := initDB()
+	conn, err := amqp091.Dial(os.Getenv("RABBITMQ_URL"))
 	if err != nil {
-		log.Fatal(err)
-	}
-	defer db.Close()
-	log.Println("Database initialized")
-
-	conn, err := amqp091.Dial(rabbitMQUrl)
-	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Failed to connect to RabbitMQ: %v", err)
 	}
 	defer conn.Close()
-	log.Println("Connected to RabbitMQ")
 
 	ch, err := conn.Channel()
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer ch.Close()
-	log.Println("Channel opened")
 
 	q, err := ch.QueueDeclare(
 		"video_download",
@@ -152,9 +105,8 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Println("Queue declared")
 
-	_, err = ch.Consume(
+	msgs, err := ch.Consume(
 		q.Name,
 		"",
 		true,
@@ -166,117 +118,90 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Println("Started consuming messages")
 
-	bot, err := tgbotapi.NewBotAPI(telegramBotToken)
-	if err != nil {
-		log.Panic(err)
-	}
-	log.Println("Telegram bot initialized")
-
-	botMessageHandler := func(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
-		if update.Message != nil {
-			if update.Message.IsCommand() {
-				switch update.Message.Command() {
-				case "start":
-					msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Welcome to the Instagram Video Downloader Bot! Send me an Instagram link to download the video.")
-					bot.Send(msg)
-				default:
-					msg := tgbotapi.NewMessage(update.Message.Chat.ID, "I don't know that command")
-					bot.Send(msg)
-				}
-			} else if update.Message.Text != "" {
-				url := update.Message.Text
-				matched, err := regexp.MatchString(`https://(www\.)?instagram\.com/.*`, url)
-				if err != nil || !matched {
-					msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Please send a valid Instagram link.")
-					bot.Send(msg)
-					return
-				}
-
-				msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Downloading your video. Please wait...")
-				bot.Send(msg)
-
-				filePath, size, previewImage, tags, description, err := downloadVideo(url)
-				if err != nil {
-					errorMessage := fmt.Sprintf("Failed to download video: %v", err)
-					log.Println(errorMessage)
-					msg := tgbotapi.NewMessage(update.Message.Chat.ID, errorMessage)
-					bot.Send(msg)
-					return
-				}
-
-				file, err := os.Open(filePath)
-				if err != nil {
-					errorMessage := fmt.Sprintf("Failed to open video: %v", err)
-					log.Println(errorMessage)
-					msg := tgbotapi.NewMessage(update.Message.Chat.ID, errorMessage)
-					bot.Send(msg)
-					return
-				}
-				defer file.Close()
-
-				videoMsg := tgbotapi.NewVideoUpload(update.Message.Chat.ID, tgbotapi.FileReader{
-					Name:   "video.mp4",
-					Reader: file,
-					Size:   -1,
-				})
-				bot.Send(videoMsg)
-
-				if description != "" {
-					descMsg := tgbotapi.NewMessage(update.Message.Chat.ID, description)
-					bot.Send(descMsg)
-				}
-
-				userID := update.Message.From.ID
-				username := update.Message.From.UserName
-				firstName := update.Message.From.FirstName
-				lastName := update.Message.From.LastName
-
-				// Save user information to the database
-				_, err = db.Exec(insertUserQuery, userID, username, firstName, lastName)
-				if err != nil {
-					log.Printf("Failed to save user information: %v", err)
-				} else {
-					log.Println("User information saved")
-				}
-
-				// Update user total bytes downloaded
-				_, err = db.Exec(updateUserQuery, size, userID)
-				if err != nil {
-					log.Printf("Failed to update user total bytes downloaded: %v", err)
-				} else {
-					log.Println("User total bytes downloaded updated")
-				}
-
-				// Save the download information to the database
-				_, err = db.Exec(insertDownloadQuery, userID, url, size, previewImage, tags, description)
-				if err != nil {
-					log.Printf("Failed to save download information: %v", err)
-				} else {
-					log.Println("Download information saved")
-				}
-
-				// Save the URL to the database
-				_, err = db.Exec(insertProcessedURLQuery, url, size, previewImage, tags, description)
-				if err != nil {
-					log.Printf("Failed to save URL: %v", err)
-				} else {
-					log.Println("URL information saved")
-				}
-			}
-		}
-	}
-
-	u := tgbotapi.NewUpdate(0)
-	u.Timeout = 60
-
-	updates, err := bot.GetUpdatesChan(u)
+	completionQueue, err := ch.QueueDeclare(
+		"video_download_completion",
+		false,
+		false,
+		false,
+		false,
+		nil,
+	)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	for update := range updates {
-		go botMessageHandler(bot, update)
+	db, err := sql.Open("sqlite3", databaseFile)
+	if err != nil {
+		log.Fatal(err)
 	}
+	defer db.Close()
+
+	forever := make(chan bool)
+
+	go func() {
+		for d := range msgs {
+			var task DownloadTask
+			err := json.Unmarshal(d.Body, &task)
+			if err != nil {
+				log.Printf("Failed to unmarshal task: %v", err)
+				continue
+			}
+
+			filePath, size, previewImage, tags, description, err := downloadVideo(task.URL)
+			if err != nil {
+				log.Printf("Failed to download video: %v", err)
+				continue
+			}
+
+			_, err = db.Exec(
+				`INSERT INTO processed_urls (url, file_size, preview_image, tags, description) VALUES (?, ?, ?, ?, ?)`,
+				task.URL, size, previewImage, tags, description,
+			)
+			if err != nil {
+				log.Printf("Failed to save URL: %v", err)
+			} else {
+				log.Println("URL information saved")
+			}
+
+			result := DownloadResult{
+				URL:          task.URL,
+				FilePath:     filePath,
+				Size:         size,
+				PreviewImage: previewImage,
+				Tags:         tags,
+				Description:  description,
+				ChatID:       task.ChatID,
+				MessageID:    task.MessageID,
+			}
+			body, err := json.Marshal(result)
+			if err != nil {
+				log.Printf("Failed to marshal result: %v", err)
+				continue
+			}
+
+			err = ch.Publish(
+				"",
+				completionQueue.Name,
+				false,
+				false,
+				amqp091.Publishing{
+					ContentType: "application/json",
+					Body:        body,
+				})
+			if err != nil {
+				log.Printf("Failed to publish result: %v", err)
+				continue
+			}
+
+			// Cleanup downloaded video file
+			err = os.Remove(filePath)
+			if err != nil {
+				log.Printf("Failed to delete video file: %v", err)
+			}
+		}
+	}()
+
+	log.Printf("Waiting for messages. To exit press CTRL+C")
+	<-forever
 }

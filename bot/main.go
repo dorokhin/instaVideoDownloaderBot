@@ -1,15 +1,30 @@
 package main
 
 import (
+	"encoding/json"
 	"log"
 	"os"
-	"time"
 
 	"github.com/go-telegram-bot-api/telegram-bot-api"
 	"github.com/rabbitmq/amqp091-go"
 )
 
-var rabbitMQUrl = os.Getenv("RABBITMQ_URL")
+type DownloadTask struct {
+	URL       string `json:"url"`
+	ChatID    int64  `json:"chat_id"`
+	MessageID int    `json:"message_id"`
+}
+
+type DownloadResult struct {
+	URL          string `json:"url"`
+	FilePath     string `json:"file_path"`
+	Size         int64  `json:"size"`
+	PreviewImage string `json:"preview_image"`
+	Tags         string `json:"tags"`
+	Description  string `json:"description"`
+	ChatID       int64  `json:"chat_id"`
+	MessageID    int    `json:"message_id"`
+}
 
 func main() {
 	bot, err := tgbotapi.NewBotAPI(os.Getenv("TELEGRAM_BOT_TOKEN"))
@@ -24,16 +39,8 @@ func main() {
 
 	updates, _ := bot.GetUpdatesChan(u)
 
-	var conn *amqp091.Connection
-	for i := 0; i < 5; i++ {
-		conn, err = amqp091.Dial(rabbitMQUrl)
-		if err == nil {
-			break
-		}
-		log.Printf("Failed to connect to RabbitMQ: %v. Retrying...", err)
-		time.Sleep(5 * time.Second)
-	}
-	if conn == nil {
+	conn, err := amqp091.Dial(os.Getenv("RABBITMQ_URL"))
+	if err != nil {
 		log.Fatalf("Failed to connect to RabbitMQ: %v", err)
 	}
 	defer conn.Close()
@@ -44,7 +51,7 @@ func main() {
 	}
 	defer ch.Close()
 
-	q, err := ch.QueueDeclare(
+	downloadQueue, err := ch.QueueDeclare(
 		"video_download",
 		false,
 		false,
@@ -56,33 +63,84 @@ func main() {
 		log.Fatal(err)
 	}
 
+	completionQueue, err := ch.QueueDeclare(
+		"video_download_completion",
+		false,
+		false,
+		false,
+		false,
+		nil,
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	msgs, err := ch.Consume(
+		completionQueue.Name,
+		"",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	go func() {
+		for d := range msgs {
+			var result DownloadResult
+			err := json.Unmarshal(d.Body, &result)
+			if err != nil {
+				log.Printf("Failed to unmarshal result: %v", err)
+				continue
+			}
+
+			msg := tgbotapi.NewVideoUpload(result.ChatID, result.FilePath)
+			msg.Caption = result.Description
+			msg.ReplyToMessageID = result.MessageID
+
+			_, err = bot.Send(msg)
+			if err != nil {
+				log.Printf("Failed to send video: %v", err)
+			}
+		}
+	}()
+
 	for update := range updates {
 		if update.Message == nil {
 			continue
 		}
 
 		link := update.Message.Text
+		chatID := update.Message.Chat.ID
+		messageID := update.Message.MessageID
 
-		headers := amqp091.Table{
-			"chat_id":    update.Message.Chat.ID,
-			"user_id":    update.Message.From.ID,
-			"username":   update.Message.From.UserName,
-			"first_name": update.Message.From.FirstName,
-			"last_name":  update.Message.From.LastName,
+		task := DownloadTask{
+			URL:       link,
+			ChatID:    chatID,
+			MessageID: messageID,
+		}
+
+		body, err := json.Marshal(task)
+		if err != nil {
+			log.Printf("Failed to marshal task: %v", err)
+			continue
 		}
 
 		err = ch.Publish(
 			"",
-			q.Name,
+			downloadQueue.Name,
 			false,
 			false,
 			amqp091.Publishing{
-				ContentType: "text/plain",
-				Body:        []byte(link),
-				Headers:     headers,
+				ContentType: "application/json",
+				Body:        body,
 			})
 		if err != nil {
-			log.Fatal(err)
+			log.Printf("Failed to publish task: %v", err)
+			continue
 		}
 	}
 }
