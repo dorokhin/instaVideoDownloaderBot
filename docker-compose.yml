@@ -35,6 +35,8 @@ services:
       - NO_PROXY=localhost,127.0.0.1,172.17.0.1
     depends_on:
       - rabbitmq
+    volumes:
+      - shared_tmp:/tmp
   downloader:
     build:
       context: .
@@ -51,6 +53,7 @@ services:
     volumes:
       - ./data:/app/data
       - ./cookies.txt:/app/cookies.txt
+      - shared_tmp:/tmp
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - RABBITMQ_URL=${RABBITMQ_URL}
@@ -76,3 +79,6 @@ services:
       - 8080:8080
     depends_on:
       - rabbitmq
+
+volumes:
+  shared_tmp:
