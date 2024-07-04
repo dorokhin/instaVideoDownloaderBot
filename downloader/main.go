@@ -35,6 +35,33 @@ var (
 	databaseFile    = "/app/data/videos.db"
 )
 
+var (
+	createTablesQuery = `
+	CREATE TABLE IF NOT EXISTS processed_urls (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		url TEXT NOT NULL,
+		timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+	CREATE TABLE IF NOT EXISTS users (
+		id INTEGER PRIMARY KEY,
+		user_id INTEGER NOT NULL,
+		username TEXT,
+		first_name TEXT,
+		last_name TEXT
+	);
+	CREATE TABLE IF NOT EXISTS downloads (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		user_id INTEGER NOT NULL,
+		url TEXT NOT NULL,
+		timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (user_id) REFERENCES users (id)
+	);
+	`
+	insertUserQuery         = `INSERT OR IGNORE INTO users (user_id, username, first_name, last_name) VALUES (?, ?, ?, ?)`
+	insertDownloadQuery     = `INSERT INTO downloads (user_id, url) VALUES (?, ?)`
+	insertProcessedURLQuery = `INSERT INTO processed_urls (url) VALUES (?)`
+)
+
 func init() {
 	if cookiesFilePath == "" {
 		log.Fatal("COOKIES_FILE_PATH environment variable is not set")
@@ -94,7 +121,22 @@ func downloadVideo(url string) (string, int64, string, string, string, error) {
 	return outputPath, size, previewImage, tags, description, nil
 }
 
+func initDB() (*sql.DB, error) {
+	db, err := sql.Open("sqlite3", databaseFile)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = db.Exec(createTablesQuery)
+	if err != nil {
+		return nil, err
+	}
+
+	return db, nil
+}
+
 func main() {
+	log.Println("Starting downloader service")
 	conn, err := amqp091.Dial(os.Getenv("RABBITMQ_URL"))
 	if err != nil {
 		log.Fatalf("Failed to connect to RabbitMQ: %v", err)
@@ -144,7 +186,7 @@ func main() {
 		log.Fatalf("Failed to declare a queue: %v", err)
 	}
 
-	db, err := sql.Open("sqlite3", databaseFile)
+	db, err := initDB()
 	if err != nil {
 		log.Fatalf("Failed to open database: %v", err)
 	}
