@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
@@ -33,6 +34,18 @@ var (
 	cookiesFilePath = os.Getenv("COOKIES_FILE_PATH")
 	databaseFile    = "/app/data/videos.db"
 )
+
+func init() {
+	if cookiesFilePath == "" {
+		log.Fatal("COOKIES_FILE_PATH environment variable is not set")
+	}
+	fmt.Printf("Cookies File Path: %s\n", cookiesFilePath)
+	cookiesContent, err := os.ReadFile(cookiesFilePath)
+	if err != nil {
+		log.Fatalf("Failed to read cookies file: %v", err)
+	}
+	fmt.Printf("Cookies File Content:\n%s\n", string(cookiesContent))
+}
 
 func downloadVideo(url string) (string, int64, string, string, string, error) {
 	outputPath := "/tmp/video.mp4"
@@ -90,7 +103,7 @@ func main() {
 
 	ch, err := conn.Channel()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Failed to open a channel: %v", err)
 	}
 	defer ch.Close()
 
@@ -103,7 +116,7 @@ func main() {
 		nil,
 	)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Failed to declare a queue: %v", err)
 	}
 
 	msgs, err := ch.Consume(
@@ -116,7 +129,7 @@ func main() {
 		nil,
 	)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Failed to register a consumer: %v", err)
 	}
 
 	completionQueue, err := ch.QueueDeclare(
@@ -128,12 +141,12 @@ func main() {
 		nil,
 	)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Failed to declare a queue: %v", err)
 	}
 
 	db, err := sql.Open("sqlite3", databaseFile)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Failed to open database: %v", err)
 	}
 	defer db.Close()
 
@@ -194,7 +207,6 @@ func main() {
 				continue
 			}
 
-			// Cleanup downloaded video file
 			err = os.Remove(filePath)
 			if err != nil {
 				log.Printf("Failed to delete video file: %v", err)
