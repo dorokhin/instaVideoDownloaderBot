@@ -9,10 +9,18 @@ import (
 	"github.com/rabbitmq/amqp091-go"
 )
 
+type UserInfo struct {
+	UserID    int64  `json:"user_id"`
+	UserName  string `json:"username"`
+	FirstName string `json:"first_name"`
+	LastName  string `json:"last_name"`
+}
+
 type DownloadTask struct {
-	URL       string `json:"url"`
-	ChatID    int64  `json:"chat_id"`
-	MessageID int    `json:"message_id"`
+	URL       string   `json:"url"`
+	ChatID    int64    `json:"chat_id"`
+	MessageID int      `json:"message_id"`
+	User      UserInfo `json:"user"`
 }
 
 type DownloadResult struct {
@@ -122,10 +130,18 @@ func main() {
 		chatID := update.Message.Chat.ID
 		messageID := update.Message.MessageID
 
+		user := UserInfo{
+			UserID:    int64(update.Message.From.ID),
+			UserName:  update.Message.From.UserName,
+			FirstName: update.Message.From.FirstName,
+			LastName:  update.Message.From.LastName,
+		}
+
 		task := DownloadTask{
 			URL:       link,
 			ChatID:    chatID,
 			MessageID: messageID,
+			User:      user,
 		}
 
 		body, err := json.Marshal(task)
@@ -146,6 +162,8 @@ func main() {
 		if err != nil {
 			log.Printf("Failed to publish task: %v", err)
 			continue
+		} else {
+			log.Println("Task published")
 		}
 	}
 }

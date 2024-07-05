@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"log"
 	"net/http"
+	"os"
 	"text/template"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -292,9 +293,33 @@ func statisticsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func serveStaticFiles(directory string, allowDirListing bool) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !allowDirListing && r.URL.Path == "/" {
+			http.Error(w, "Directory listing is not allowed", http.StatusForbidden)
+			return
+		}
+		http.FileServer(http.Dir(directory)).ServeHTTP(w, r)
+	})
+}
+
+func GetEnv(key, fallback string) string {
+	value, exists := os.LookupEnv(key)
+	if !exists {
+		value = fallback
+	}
+	return value
+}
+
 func main() {
+	// Read environment variables
+	downloadDir := GetEnv("DOWNLOAD_DIR", "/static")
+
+	allowDirListing := GetEnv("ALLOW_DIR_LISTING", "false") == "true"
+
 	http.HandleFunc("/processed_urls", processedURLsHandler)
 	http.HandleFunc("/user_downloads", userDownloadsHandler)
 	http.HandleFunc("/statistics", statisticsHandler)
+	http.Handle("/static/", http.StripPrefix("/static", serveStaticFiles(downloadDir, allowDirListing)))
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }

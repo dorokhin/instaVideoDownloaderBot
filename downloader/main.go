@@ -7,16 +7,29 @@ import (
 	"github.com/google/uuid"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/rabbitmq/amqp091-go"
+	"io"
 	"log"
+	"math/rand"
+	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"time"
 )
 
+type UserInfo struct {
+	UserID    int64  `json:"user_id"`
+	UserName  string `json:"username"`
+	FirstName string `json:"first_name"`
+	LastName  string `json:"last_name"`
+}
+
 type DownloadTask struct {
-	URL       string `json:"url"`
-	ChatID    int64  `json:"chat_id"`
-	MessageID int    `json:"message_id"`
+	URL       string   `json:"url"`
+	ChatID    int64    `json:"chat_id"`
+	MessageID int      `json:"message_id"`
+	User      UserInfo `json:"user"`
 }
 
 type DownloadResult struct {
@@ -67,9 +80,18 @@ var (
 	);
 	`
 	insertUserQuery         = `INSERT OR IGNORE INTO users (user_id, username, first_name, last_name) VALUES (?, ?, ?, ?)`
-	insertDownloadQuery     = `INSERT INTO downloads (user_id, url) VALUES (?, ?)`
-	insertProcessedURLQuery = `INSERT INTO processed_urls (url) VALUES (?)`
+	updateUserQuery         = `UPDATE users SET total_bytes_downloaded = total_bytes_downloaded + ? WHERE user_id = ?`
+	insertDownloadQuery     = `INSERT INTO downloads (user_id, url, file_size, preview_image, tags, description) VALUES (?, ?, ?, ?, ?, ?)`
+	insertProcessedURLQuery = `INSERT INTO processed_urls (url, file_size, preview_image, tags, description) VALUES (?, ?, ?, ?, ?)`
 )
+
+func GetEnv(key, fallback string) string {
+	value, exists := os.LookupEnv(key)
+	if !exists {
+		value = fallback
+	}
+	return value
+}
 
 func init() {
 	if cookiesFilePath == "" {
@@ -156,9 +178,94 @@ func initDB() (*sql.DB, error) {
 	return db, nil
 }
 
+// Function to get random user agent
+func getRandomUserAgent() string {
+	userAgents := []string{
+		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+		"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15",
+		"Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:89.0) Gecko/20100101 Firefox/89.0",
+	}
+	return userAgents[rand.Intn(len(userAgents))]
+}
+
+// Function to get file extension from content type
+func getFileExtension(contentType string) string {
+	switch contentType {
+	case "image/jpeg":
+		return ".jpg"
+	case "image/png":
+		return ".png"
+	case "image/gif":
+		return ".gif"
+	default:
+		return ""
+	}
+}
+
+func DownloadImage(url string) (string, error) {
+	// Get random user agent
+	userAgent := getRandomUserAgent()
+
+	// Create HTTP request
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		errMsg := fmt.Sprintf("Failed to create request: %v", err)
+		log.Println(errMsg)
+		return "", err
+	}
+	req.Header.Set("User-Agent", userAgent)
+
+	// Perform HTTP request
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		errMsg := fmt.Sprintf("Failed to download image: %v", err)
+		log.Println(errMsg)
+		return "", err
+	}
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			log.Println("Failed to close response body")
+		}
+	}(resp.Body)
+
+	// Generate filename
+	uuidFilename := uuid.New().String()
+	fileExtension := getFileExtension(resp.Header.Get("Content-Type"))
+	currentDate := time.Now().Format("2006_01_02")
+	filename := fmt.Sprintf("%s.%s", uuidFilename, fileExtension)
+	filename = filepath.Join(currentDate, filename)
+
+	// Save file
+	filePath := filepath.Join(GetEnv("DOWNLOAD_DIR", "/static"), filename)
+	file, err := os.Create(filePath)
+	if err != nil {
+		errMsg := fmt.Sprintf("Failed to create file: %v", err)
+		log.Println(errMsg)
+		return "", err
+	}
+	defer func(file *os.File) {
+		err := file.Close()
+		if err != nil {
+			log.Println("Failed to close file")
+		}
+	}(file)
+
+	_, err = io.Copy(file, resp.Body)
+	if err != nil {
+		errMsg := fmt.Sprintf("Failed to save file: %v", err)
+		log.Println(errMsg)
+		return "", err
+	}
+
+	log.Printf("Image from url: %s downloaded and saved as %s to %s", url, filename, filePath)
+
+	return filename, nil
+}
+
 func main() {
 	log.Println("Starting downloader service")
-	conn, err := amqp091.Dial(os.Getenv("RABBITMQ_URL"))
+	conn, err := amqp091.Dial(GetEnv("RABBITMQ_URL", ""))
 	if err != nil {
 		log.Fatalf("Failed to connect to RabbitMQ: %v", err)
 	}
@@ -223,54 +330,81 @@ func main() {
 				log.Printf("Failed to unmarshal task: %v", err)
 				continue
 			}
+
+			// Save user information to the database
+			_, err = db.Exec(insertUserQuery, task.User.UserID, task.User.UserName, task.User.FirstName, task.User.LastName)
+			if err != nil {
+				log.Printf("Failed to save user information: %v", err)
+			} else {
+				log.Println("User information saved")
+			}
+
 			log.Println("Accepted task for download video from: ", task.URL, "ChatID: ", task.ChatID)
-			filePath, size, previewImage, tags, description, err := downloadVideo(task.URL)
-			log.Println("Completed task for download video from: ", task.URL, "saved to: ", filePath, "size: ", size, "preview image: ", previewImage, "tags: ", tags, "description: ", description)
+			filePath, size, previewImageUrl, tags, description, err := downloadVideo(task.URL)
+			log.Println("Completed task for download video from: ", task.URL, "saved to: ", filePath, "size: ", size, "preview image: ", previewImageUrl, "tags: ", tags, "description: ", description)
 			if err != nil {
 				log.Printf("Failed to download video: %v", err)
 				continue
 			}
 
-			_, err = db.Exec(
-				`INSERT INTO processed_urls (url, file_size, preview_image, tags, description) VALUES (?, ?, ?, ?, ?)`,
-				task.URL, size, previewImage, tags, description,
-			)
+			previewImage, err := DownloadImage(previewImageUrl)
 			if err != nil {
-				log.Printf("Failed to save URL: %v", err)
+				log.Printf("Failed to download preview image: %v", err)
+			}
+
+			// Save the download information to the database
+			_, err = db.Exec(insertDownloadQuery, task.User.UserID, task.URL, size, previewImage, tags, description)
+			if err != nil {
+				log.Printf("Failed to save download information: %v", err)
 			} else {
-				log.Println("URL information saved")
+				log.Println("Download information saved")
 			}
 
-			result := DownloadResult{
-				URL:          task.URL,
-				FilePath:     filePath,
-				Size:         size,
-				PreviewImage: previewImage,
-				Tags:         tags,
-				Description:  description,
-				ChatID:       task.ChatID,
-				MessageID:    task.MessageID,
-			}
-			body, err := json.Marshal(result)
+			_, err = db.Exec(insertProcessedURLQuery, task.URL, size, previewImage, tags, description)
+
+			// Update user total bytes downloaded
+			_, err = db.Exec(updateUserQuery, size, task.User.UserID)
 			if err != nil {
-				log.Printf("Failed to marshal result: %v", err)
-				continue
-			}
+				log.Printf("Failed to update user total bytes downloaded: %v", err)
+			} else {
+				log.Println("User total bytes downloaded updated")
+				if err != nil {
+					log.Printf("Failed to save URL: %v", err)
+				} else {
+					log.Println("URL information saved")
+				}
 
-			err = ch.Publish(
-				"",
-				completionQueue.Name,
-				false,
-				false,
-				amqp091.Publishing{
-					ContentType: "application/json",
-					Body:        body,
-				})
-			if err != nil {
-				log.Printf("Failed to publish result: %v", err)
-				continue
-			}
+				result := DownloadResult{
+					URL:          task.URL,
+					FilePath:     filePath,
+					Size:         size,
+					PreviewImage: previewImage,
+					Tags:         tags,
+					Description:  description,
+					ChatID:       task.ChatID,
+					MessageID:    task.MessageID,
+				}
+				body, err := json.Marshal(result)
+				if err != nil {
+					log.Printf("Failed to marshal result: %v", err)
+					continue
+				}
 
+				err = ch.Publish(
+					"",
+					completionQueue.Name,
+					false,
+					false,
+					amqp091.Publishing{
+						ContentType: "application/json",
+						Body:        body,
+					})
+				if err != nil {
+					log.Printf("Failed to publish result: %v", err)
+					continue
+				}
+
+			}
 		}
 	}()
 

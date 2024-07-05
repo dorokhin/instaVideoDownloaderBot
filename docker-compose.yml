@@ -1,12 +1,11 @@
 ---
-version: "3.8"
 services:
   rabbitmq:
     image: rabbitmq:3-management
     container_name: rabbitmq
     ports:
-      - 5672:5672
-      - 15672:15672
+      - "5672:5672"
+      - "15672:15672"
     environment:
       RABBITMQ_DEFAULT_USER: guest
       RABBITMQ_DEFAULT_PASS: guest
@@ -54,6 +53,7 @@ services:
       - ./data:/app/data
       - ./cookies.txt:/app/cookies.txt
       - shared_tmp:/tmp
+      - static:/static
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - RABBITMQ_URL=${RABBITMQ_URL}
@@ -75,10 +75,12 @@ services:
       - /admin
     volumes:
       - ./data:/app/data
+      - static:/static
     ports:
-      - 8080:8080
+      - "8080:8080"
     depends_on:
       - rabbitmq
 
 volumes:
   shared_tmp:
+  static:
