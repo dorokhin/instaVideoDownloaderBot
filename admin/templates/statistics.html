@@ -3,11 +3,32 @@
 <head>
     <title>Statistics</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/semantic-ui/2.4.1/semantic.min.css">
+    <script>
+        function formatFileSize(size) {
+            const units = ["bytes", "KB", "MB", "GB", "TB"];
+            let unit = 0;
+            while (size >= 1024 && unit < units.length - 1) {
+                size /= 1024;
+                unit++;
+            }
+            return size.toFixed(2) + " " + units[unit];
+        }
+
+        function convertFileSizes() {
+            const elements = document.querySelectorAll(".file-size");
+            elements.forEach(el => {
+                const size = parseInt(el.getAttribute("data-size"));
+                el.textContent = formatFileSize(size);
+            });
+        }
+
+        document.addEventListener("DOMContentLoaded", convertFileSizes);
+    </script>
 </head>
 <body>
     <div class="ui container">
         <h1 class="ui header">Statistics</h1>
-        <p>Total File Size: {{.TotalFileSize}} bytes</p>
+        <p>Total File Size: <span class="file-size" data-size="{{.TotalFileSize}}"></span></p>
         <p>Total Downloads: {{.TotalDownloads}}</p>
         <h2 class="ui header">User Downloads</h2>
         <table class="ui celled table">
@@ -34,7 +55,7 @@
                     <td>{{.LastName}}</td>
                     <td>{{.URL}}</td>
                     <td>{{.Timestamp}}</td>
-                    <td>{{.FileSize}}</td>
+                    <td class="file-size" data-size="{{.FileSize}}"></td>
                     <td><img src="/static/{{.PreviewImage}}" alt="Preview Image" class="ui small image"></td>
                     <td>{{.Tags}}</td>
                     <td>{{.Description}}</td>
