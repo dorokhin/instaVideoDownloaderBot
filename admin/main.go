@@ -96,7 +96,7 @@ func processedURLsHandler(w http.ResponseWriter, r *http.Request) {
 					<td>{{.URL}}</td>
 					<td>{{.Timestamp}}</td>
 					<td>{{.FileSize}}</td>
-					<td><img src="{{.PreviewImage}}" alt="Preview Image" width="100"></td>
+					<td><img src="/static/{{.PreviewImage}}" alt="Preview Image" width="100"></td>
 					<td>{{.Tags}}</td>
 					<td>{{.Description}}</td>
 				</tr>
@@ -173,7 +173,7 @@ func userDownloadsHandler(w http.ResponseWriter, r *http.Request) {
 					<td>{{.URL}}</td>
 					<td>{{.Timestamp}}</td>
 					<td>{{.FileSize}}</td>
-					<td><img src="{{.PreviewImage}}" alt="Preview Image" width="100"></td>
+					<td><img src="/static/{{.PreviewImage}}" alt="Preview Image" width="100"></td>
 					<td>{{.Tags}}</td>
 					<td>{{.Description}}</td>
 				</tr>
@@ -274,7 +274,7 @@ func statisticsHandler(w http.ResponseWriter, r *http.Request) {
 					<td>{{.URL}}</td>
 					<td>{{.Timestamp}}</td>
 					<td>{{.FileSize}}</td>
-					<td><img src="{{.PreviewImage}}" alt="Preview Image" width="100"></td>
+					<td><img src="/static/{{.PreviewImage}}" alt="Preview Image" width="100"></td>
 					<td>{{.Tags}}</td>
 					<td>{{.Description}}</td>
 				</tr>
