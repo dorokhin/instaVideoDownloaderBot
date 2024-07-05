@@ -192,11 +192,11 @@ func getRandomUserAgent() string {
 func getFileExtension(contentType string) string {
 	switch contentType {
 	case "image/jpeg":
-		return ".jpg"
+		return "jpg"
 	case "image/png":
-		return ".png"
+		return "png"
 	case "image/gif":
-		return ".gif"
+		return "gif"
 	default:
 		return ""
 	}
@@ -232,12 +232,19 @@ func DownloadImage(url string) (string, error) {
 	// Generate filename
 	uuidFilename := uuid.New().String()
 	fileExtension := getFileExtension(resp.Header.Get("Content-Type"))
-	currentDate := time.Now().Format("2006_01_02")
+
 	filename := fmt.Sprintf("%s.%s", uuidFilename, fileExtension)
-	filename = filepath.Join(currentDate, filename)
 
 	// Save file
-	filePath := filepath.Join(GetEnv("DOWNLOAD_DIR", "/static"), filename)
+	currentDate := time.Now().Format("2006_01_02")
+	dirPath := filepath.Join(GetEnv("DOWNLOAD_DIR", "/static"), currentDate)
+	// Create directories if they don't exist
+	err = os.MkdirAll(dirPath, os.ModePerm)
+	if err != nil {
+		fmt.Println("Error creating directories:", err)
+		return "", err
+	}
+	filePath := filepath.Join(dirPath, filename)
 	file, err := os.Create(filePath)
 	if err != nil {
 		errMsg := fmt.Sprintf("Failed to create file: %v", err)
@@ -260,7 +267,7 @@ func DownloadImage(url string) (string, error) {
 
 	log.Printf("Image from url: %s downloaded and saved as %s to %s", url, filename, filePath)
 
-	return filename, nil
+	return filepath.Join(currentDate, filename), nil
 }
 
 func main() {
