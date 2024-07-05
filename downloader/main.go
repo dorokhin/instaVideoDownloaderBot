@@ -95,7 +95,7 @@ func downloadVideo(url string) (string, int64, string, string, string, error) {
 		log.Printf("Failed to download video: %s", string(output))
 		return "", 0, "", "", "", err
 	}
-	infoFile := "/tmp/video.info.json"
+	infoFile := fmt.Sprintf("/tmp/%s.info.json", id.String())
 	info, err := os.ReadFile(infoFile)
 	if err != nil {
 		log.Printf("Failed to read info file: %s", err)
@@ -129,6 +129,13 @@ func downloadVideo(url string) (string, int64, string, string, string, error) {
 		if desc, ok := infoJSON["description"].(string); ok {
 			description = desc
 		}
+	}
+
+	err = os.Remove(infoFile)
+	if err != nil {
+		log.Printf("Failed to delete video file: %s %v", infoFile, err)
+	} else {
+		log.Println("Successfully deleted info file: ", infoFile)
 	}
 
 	return outputPath, size, previewImage, tags, description, nil
