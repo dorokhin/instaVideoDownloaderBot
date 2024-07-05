@@ -4,13 +4,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/google/uuid"
+	_ "github.com/mattn/go-sqlite3"
+	"github.com/rabbitmq/amqp091-go"
 	"log"
 	"os"
 	"os/exec"
 	"strings"
-
-	_ "github.com/mattn/go-sqlite3"
-	"github.com/rabbitmq/amqp091-go"
 )
 
 type DownloadTask struct {
@@ -84,8 +84,12 @@ func init() {
 }
 
 func downloadVideo(url string) (string, int64, string, string, string, error) {
-	outputPath := "/tmp/video.mp4"
-	cmd := exec.Command("yt-dlp", "-o", "/tmp/video.%(ext)s", "--cookies", cookiesFilePath, "--write-info-json", url)
+	id := uuid.New()
+	// Determine file extension (assume mp4 for simplicity)
+	fileExt := "mp4" // yt-dlp will determine the correct extension
+	outputPath := fmt.Sprintf("/tmp/%s.%s", id.String(), fileExt)
+	log.Println("Starting downloading video to: ", outputPath)
+	cmd := exec.Command("yt-dlp", "-o", fmt.Sprintf("/tmp/%s.%%(ext)s", id.String()), "--cookies", cookiesFilePath, "--write-info-json", url)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Printf("Failed to download video: %s", string(output))
@@ -131,6 +135,7 @@ func downloadVideo(url string) (string, int64, string, string, string, error) {
 }
 
 func initDB() (*sql.DB, error) {
+	log.Println("Initializing database")
 	db, err := sql.Open("sqlite3", databaseFile)
 	if err != nil {
 		return nil, err
@@ -211,8 +216,9 @@ func main() {
 				log.Printf("Failed to unmarshal task: %v", err)
 				continue
 			}
-
+			log.Println("Accepted task for download video from: ", task.URL, "ChatID: ", task.ChatID)
 			filePath, size, previewImage, tags, description, err := downloadVideo(task.URL)
+			log.Println("Completed task for download video from: ", task.URL, "saved to: ", filePath, "size: ", size, "preview image: ", previewImage, "tags: ", tags, "description: ", description)
 			if err != nil {
 				log.Printf("Failed to download video: %v", err)
 				continue
@@ -258,10 +264,6 @@ func main() {
 				continue
 			}
 
-			err = os.Remove(filePath)
-			if err != nil {
-				log.Printf("Failed to delete video file: %v", err)
-			}
 		}
 	}()
 

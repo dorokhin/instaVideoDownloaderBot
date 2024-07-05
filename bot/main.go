@@ -105,6 +105,11 @@ func main() {
 			if err != nil {
 				log.Printf("Failed to send video: %v", err)
 			}
+
+			err = os.Remove(result.FilePath)
+			if err != nil {
+				log.Printf("Failed to delete video file: %v", err)
+			}
 		}
 	}()
 
