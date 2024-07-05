@@ -30,11 +30,12 @@ RUN cd admin && CGO_ENABLED=1 GOOS=linux go build -o /admin
 # Stage 4: Create the final image
 FROM alpine:latest
 
-WORKDIR /root/
+WORKDIR /app/
 
-COPY --from=bot_builder /bot /bot
-COPY --from=downloader_builder /downloader /downloader
-COPY --from=admin_builder /admin /admin
+COPY --from=bot_builder /bot /app/bot
+COPY --from=downloader_builder /downloader /app/downloader
+COPY --from=admin_builder /admin /app/admin
+COPY --from=admin_builder /app/admin/templates /app/templates
 
 RUN apk add --no-cache ca-certificates yt-dlp sqlite
 

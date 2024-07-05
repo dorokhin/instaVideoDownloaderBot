@@ -24,7 +24,7 @@ services:
       - /wait-for
       - rabbitmq:5672
       - --
-      - /bot
+      - /app/bot
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - RABBITMQ_URL=${RABBITMQ_URL}
@@ -48,7 +48,7 @@ services:
       - /wait-for
       - rabbitmq:5672
       - --
-      - /downloader
+      - /app/downloader
     volumes:
       - ./data:/app/data
       - ./cookies.txt:/app/cookies.txt
@@ -72,7 +72,7 @@ services:
       - /wait-for
       - rabbitmq:5672
       - --
-      - /admin
+      - /app/admin
     volumes:
       - ./data:/app/data
       - static:/static
