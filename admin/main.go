@@ -12,11 +12,24 @@ import (
 
 var (
 	databaseFile = "/app/data/videos.db"
+	logger       *log.Logger
 )
+
+func init() {
+	// Create or open the log file
+	logFile, err := os.OpenFile("app.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
+	if err != nil {
+		log.Fatalf("Failed to open log file: %v", err)
+	}
+
+	// Create a new logger
+	logger = log.New(logFile, "INFO: ", log.Ldate|log.Ltime|log.Lshortfile)
+}
 
 func initDB() (*sql.DB, error) {
 	db, err := sql.Open("sqlite3", databaseFile)
 	if err != nil {
+		logger.Printf("Failed to connect to database: %v", err)
 		return nil, err
 	}
 	return db, nil
@@ -50,9 +63,14 @@ type Statistics struct {
 	UserDownloads  []UserDownload
 }
 
+func loadTemplate(name string) (*template.Template, error) {
+	return template.ParseFiles("templates/" + name + ".html")
+}
+
 func processedURLsHandler(w http.ResponseWriter, r *http.Request) {
 	db, err := initDB()
 	if err != nil {
+		logger.Printf("Error initializing DB: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -60,6 +78,7 @@ func processedURLsHandler(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := db.Query("SELECT DISTINCT url, timestamp, file_size, preview_image, tags, description FROM processed_urls")
 	if err != nil {
+		logger.Printf("Error querying processed URLs: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -69,48 +88,22 @@ func processedURLsHandler(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var url ProcessedURL
 		if err := rows.Scan(&url.URL, &url.Timestamp, &url.FileSize, &url.PreviewImage, &url.Tags, &url.Description); err != nil {
+			logger.Printf("Error scanning row: %v", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		processedURLs = append(processedURLs, url)
 	}
 
-	tmpl, err := template.New("processed_urls").Parse(`
-		<html>
-		<head>
-			<title>Processed URLs</title>
-		</head>
-		<body>
-			<h1>Processed URLs</h1>
-			<table border="1">
-				<tr>
-					<th>URL</th>
-					<th>Timestamp</th>
-					<th>File Size</th>
-					<th>Preview Image</th>
-					<th>Tags</th>
-					<th>Description</th>
-				</tr>
-				{{range .}}
-				<tr>
-					<td>{{.URL}}</td>
-					<td>{{.Timestamp}}</td>
-					<td>{{.FileSize}}</td>
-					<td><img src="/static/{{.PreviewImage}}" alt="Preview Image" width="100"></td>
-					<td>{{.Tags}}</td>
-					<td>{{.Description}}</td>
-				</tr>
-				{{end}}
-			</table>
-		</body>
-		</html>
-	`)
+	tmpl, err := loadTemplate("processed_urls")
 	if err != nil {
+		logger.Printf("Error loading template: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	if err := tmpl.Execute(w, processedURLs); err != nil {
+		logger.Printf("Error executing template: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
@@ -118,6 +111,7 @@ func processedURLsHandler(w http.ResponseWriter, r *http.Request) {
 func userDownloadsHandler(w http.ResponseWriter, r *http.Request) {
 	db, err := initDB()
 	if err != nil {
+		logger.Printf("Error initializing DB: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -129,6 +123,7 @@ func userDownloadsHandler(w http.ResponseWriter, r *http.Request) {
 		JOIN users u ON d.user_id = u.user_id
 	`)
 	if err != nil {
+		logger.Printf("Error querying user downloads: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -138,56 +133,22 @@ func userDownloadsHandler(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var download UserDownload
 		if err := rows.Scan(&download.UserID, &download.Username, &download.FirstName, &download.LastName, &download.URL, &download.Timestamp, &download.FileSize, &download.PreviewImage, &download.Tags, &download.Description); err != nil {
+			logger.Printf("Error scanning row: %v", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		userDownloads = append(userDownloads, download)
 	}
 
-	tmpl, err := template.New("user_downloads").Parse(`
-		<html>
-		<head>
-			<title>User Downloads</title>
-		</head>
-		<body>
-			<h1>User Downloads</h1>
-			<table border="1">
-				<tr>
-					<th>User ID</th>
-					<th>Username</th>
-					<th>First Name</th>
-					<th>Last Name</th>
-					<th>URL</th>
-					<th>Timestamp</th>
-					<th>File Size</th>
-					<th>Preview Image</th>
-					<th>Tags</th>
-					<th>Description</th>
-				</tr>
-				{{range .}}
-				<tr>
-					<td>{{.UserID}}</td>
-					<td>{{.Username}}</td>
-					<td>{{.FirstName}}</td>
-					<td>{{.LastName}}</td>
-					<td>{{.URL}}</td>
-					<td>{{.Timestamp}}</td>
-					<td>{{.FileSize}}</td>
-					<td><img src="/static/{{.PreviewImage}}" alt="Preview Image" width="100"></td>
-					<td>{{.Tags}}</td>
-					<td>{{.Description}}</td>
-				</tr>
-				{{end}}
-			</table>
-		</body>
-		</html>
-	`)
+	tmpl, err := loadTemplate("user_downloads")
 	if err != nil {
+		logger.Printf("Error loading template: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	if err := tmpl.Execute(w, userDownloads); err != nil {
+		logger.Printf("Error executing template: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
@@ -195,6 +156,7 @@ func userDownloadsHandler(w http.ResponseWriter, r *http.Request) {
 func statisticsHandler(w http.ResponseWriter, r *http.Request) {
 	db, err := initDB()
 	if err != nil {
+		logger.Printf("Error initializing DB: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -205,12 +167,14 @@ func statisticsHandler(w http.ResponseWriter, r *http.Request) {
 
 	err = db.QueryRow("SELECT SUM(file_size) FROM processed_urls").Scan(&totalFileSize)
 	if err != nil {
+		logger.Printf("Error querying total file size: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	err = db.QueryRow("SELECT COUNT(DISTINCT url) FROM processed_urls").Scan(&totalDownloads)
 	if err != nil {
+		logger.Printf("Error querying total downloads: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -221,6 +185,7 @@ func statisticsHandler(w http.ResponseWriter, r *http.Request) {
 		JOIN users u ON d.user_id = u.user_id
 	`)
 	if err != nil {
+		logger.Printf("Error querying user downloads: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -230,6 +195,7 @@ func statisticsHandler(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var download UserDownload
 		if err := rows.Scan(&download.UserID, &download.Username, &download.FirstName, &download.LastName, &download.URL, &download.Timestamp, &download.FileSize, &download.PreviewImage, &download.Tags, &download.Description); err != nil {
+			logger.Printf("Error scanning row: %v", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -242,53 +208,15 @@ func statisticsHandler(w http.ResponseWriter, r *http.Request) {
 		UserDownloads:  userDownloads,
 	}
 
-	tmpl, err := template.New("statistics").Parse(`
-		<html>
-		<head>
-			<title>Statistics</title>
-		</head>
-		<body>
-			<h1>Statistics</h1>
-			<p>Total File Size: {{.TotalFileSize}} bytes</p>
-			<p>Total Downloads: {{.TotalDownloads}}</p>
-			<h2>User Downloads</h2>
-			<table border="1">
-				<tr>
-					<th>User ID</th>
-					<th>Username</th>
-					<th>First Name</th>
-					<th>Last Name</th>
-					<th>URL</th>
-					<th>Timestamp</th>
-					<th>File Size</th>
-					<th>Preview Image</th>
-					<th>Tags</th>
-					<th>Description</th>
-				</tr>
-				{{range .UserDownloads}}
-				<tr>
-					<td>{{.UserID}}</td>
-					<td>{{.Username}}</td>
-					<td>{{.FirstName}}</td>
-					<td>{{.LastName}}</td>
-					<td>{{.URL}}</td>
-					<td>{{.Timestamp}}</td>
-					<td>{{.FileSize}}</td>
-					<td><img src="/static/{{.PreviewImage}}" alt="Preview Image" width="100"></td>
-					<td>{{.Tags}}</td>
-					<td>{{.Description}}</td>
-				</tr>
-				{{end}}
-			</table>
-		</body>
-		</html>
-	`)
+	tmpl, err := loadTemplate("statistics")
 	if err != nil {
+		logger.Printf("Error loading template: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	if err := tmpl.Execute(w, statistics); err != nil {
+		logger.Printf("Error executing template: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }

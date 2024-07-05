@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Processed URLs</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/semantic-ui/2.4.1/semantic.min.css">
+</head>
+<body>
+    <div class="ui container">
+        <h1 class="ui header">Processed URLs</h1>
+        <table class="ui celled table">
+            <thead>
+                <tr>
+                    <th>URL</th>
+                    <th>Timestamp</th>
+                    <th>File Size</th>
+                    <th>Preview Image</th>
+                    <th>Tags</th>
+                    <th>Description</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{range .}}
+                <tr>
+                    <td>{{.URL}}</td>
+                    <td>{{.Timestamp}}</td>
+                    <td>{{.FileSize}}</td>
+                    <td><img src="/static/{{.PreviewImage}}" alt="Preview Image" class="ui small image"></td>
+                    <td>{{.Tags}}</td>
+                    <td>{{.Description}}</td>
+                </tr>
+                {{end}}
+            </tbody>
+        </table>
+    </div>
+</body>
+</html>
